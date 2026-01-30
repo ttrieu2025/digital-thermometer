@@ -1,0 +1,364 @@
+0000              1   ; 76E003 ADC test program: Reads channel 7 on P1.1, pin 14
+0000              2   
+                  4   $LIST
+0000              6   
+0000              7   ;  N76E003 pinout:
+0000              8   ;                               -------
+0000              9   ;       PWM2/IC6/T0/AIN4/P0.5 -|1    20|- P0.4/AIN5/STADC/PWM3/IC3
+0000             10   ;               TXD/AIN3/P0.6 -|2    19|- P0.3/PWM5/IC5/AIN6
+0000             11   ;               RXD/AIN2/P0.7 -|3    18|- P0.2/ICPCK/OCDCK/RXD_1/[SCL]
+0000             12   ;                    RST/P2.0 -|4    17|- P0.1/PWM4/IC4/MISO
+0000             13   ;        INT0/OSCIN/AIN1/P3.0 -|5    16|- P0.0/PWM3/IC3/MOSI/T1
+0000             14   ;              INT1/AIN0/P1.7 -|6    15|- P1.0/PWM2/IC2/SPCLK
+0000             15   ;                         GND -|7    14|- P1.1/PWM1/IC1/AIN7/CLO
+0000             16   ;[SDA]/TXD_1/ICPDA/OCDDA/P1.6 -|8    13|- P1.2/PWM0/IC0
+0000             17   ;                         VDD -|9    12|- P1.3/SCL/[STADC]
+0000             18   ;            PWM5/IC7/SS/P1.5 -|10   11|- P1.4/SDA/FB/PWM1
+0000             19   ;                               -------
+0000             20   ;
+0000             21   
+0000             22   CLK               EQU 16600000       ; MCU frequency in Hz
+0000             23   BAUD              EQU 115200         ; UART baud rate
+0000             24   TIMER1_RELOAD     EQU (0x100-(CLK/(16*BAUD)))
+0000             25   TIMER0_RELOAD_1MS EQU (0x10000-(CLK/1000))
+0000             26   
+0000             27   ORG 0x0000
+0000 020423      28       LJMP main
+0003             29   
+0003             30   ; Messages
+0003 2D2D5468    31   test_message:  DB '--Thermometer---',0
+     65726D6F
+     6D657465
+     722D2D2D
+     00
+0014 54656D70    32   value_message: DB 'Temp =',0
+     203D00
+001B             33   
+001B             34   ; LCD pins
+001B             35   LCD_RS EQU P1.3
+001B             36   LCD_E  EQU P1.4
+001B             37   LCD_D4 EQU P0.0
+001B             38   LCD_D5 EQU P0.1
+001B             39   LCD_D6 EQU P0.2
+001B             40   LCD_D7 EQU P0.3
+001B             41   TEMP_LIMIT_C EQU 3000   ; 30.00°C (because you multiply by 100)
+001B             42   
+001B             43   
+                 45   	$LIST
+00CF             47   
+0030             48   DSEG AT 30H
+0030             49   x:   DS 4
+0034             50   y:   DS 4
+0038             51   bcd: DS 5
+003D             52   
+0000             53   BSEG
+0000             54   mf:      DBIT 1
+0001             55   isF:    DBIT 1   ; 0 = Celsius, 1 = Fahrenheit
+0002             56   
+                546   $LIST
+                 58   $LIST
+033F             60   
+033F             61   ;-----------------------------
+033F             62   ; Initialize MCU, timers, UART, ADC, pins
+033F             63   ;-----------------------------
+033F             64   Init_All:
+033F             65       ; Configure all GPIO pins as bidirectional
+033F 75AC00      66       MOV P3M1,#0x00
+0342 75AD00      67       MOV P3M2,#0x00
+0345 75B300      68       MOV P1M1,#0x00
+0348 75B400      69       MOV P1M2,#0x00
+034B 75B100      70       MOV P0M1,#0x00
+034E 75B200      71       MOV P0M2,#0x00
+0351             72   
+0351             73       ; UART init
+0351 438E10      74       ORL CKCON,#0x10
+0354 438780      75       ORL PCON,#0x80  ; SMOD=1 double baud
+0357 759852      76       MOV SCON,#0x52
+035A 53C4DF      77       ANL T3CON,#0b11011111
+035D 53890F      78       ANL TMOD,#0x0F
+0360 438920      79       ORL TMOD,#0x20   ; Timer1 mode 2
+0363 758DF7      80       MOV TH1,#TIMER1_RELOAD
+0366 D28E        81       SETB TR1
+0368             82   
+0368             83       ; Timer0 for delay
+0368 C28C        84       CLR TR0
+036A 438E08      85       ORL CKCON,#0x08
+036D 5389F0      86       ANL TMOD,#0xF0
+0370 438901      87       ORL TMOD,#0x01   ; Timer0 mode1 16-bit
+0373             88   
+0373             89       ; ADC pin P1.1 input
+0373 43B302      90       ORL P1M1,#0b00000010
+0376 53B4FD      91       ANL P1M2,#0b11111101
+0379             92   
+0379             93       ; ADC init
+0379 53E8F0      94       ANL ADCCON0,#0xF0
+037C 43E807      95       ORL ADCCON0,#0x07     ; channel 7
+037F 75F600      96       MOV AINDIDS,#0x00
+0382 43F680      97       ORL AINDIDS,#0b10000000
+0385 43E101      98       ORL ADCCON1,#0x01     ; enable ADC
+0388             99   
+0388 22         100       RET
+0389            101   
+0389            102   ;-----------------------------
+0389            103   ; 1ms wait using Timer0
+0389            104   ;-----------------------------
+0389            105   wait_1ms:
+0389 C28C       106       CLR TR0
+038B C28D       107       CLR TF0
+038D 758CBF     108       MOV TH0,#HIGH(TIMER0_RELOAD_1MS)
+0390 758A28     109       MOV TL0,#LOW(TIMER0_RELOAD_1MS)
+0393 D28C       110       SETB TR0
+0395 308DFD     111       JNB TF0,$
+0398 22         112       RET
+0399            113   
+0399            114   ; Wait R2 ms
+0399            115   waitms:
+0399 120389     116       LCALL wait_1ms
+039C DAFB       117       DJNZ R2,waitms
+039E 22         118       RET
+039F            119   
+039F            120   ;-----------------------------
+039F            121   ; UART: send character in A
+039F            122   ;-----------------------------
+039F            123   putchar:
+039F 3099FD     124       JNB TI,$
+03A2 C299       125       CLR TI
+03A4 F599       126       MOV SBUF,A
+03A6 22         127       RET
+03A7            128   
+03A7            129   
+03A7            130   
+03A7            131   ;-----------------------------
+03A7            132   ; Send temperature via UART: Fits Display_formated_BCD
+03A7            133   ; Expected format on LCD: [bcd+2].[bcd+1][bcd+0]
+03A7            134   ;-----------------------------
+03A7            135   
+03A7            136   Send_Temp_Serial:
+03A7            137       ; 1. Send Whole Number Part (from bcd+2)
+03A7            138       ; Assuming bcd+2 has Tens in high nibble and Ones in low nibble
+03A7            139       ; Or just a single digit. Let's send both nibbles:
+03A7 E53A       140       mov a, bcd+2
+03A9 C4         141       swap a
+03AA 540F       142       anl a, #0x0F
+03AC 4430       143       orl a, #0x30    ; Convert to ASCII
+03AE 12039F     144       lcall putchar
+03B1            145       
+03B1 E53A       146       mov a, bcd+2
+03B3 540F       147       anl a, #0x0F
+03B5 4430       148       orl a, #0x30
+03B7 12039F     149       lcall putchar
+03BA            150   
+03BA            151       ; 2. Send Decimal Point
+03BA 742E       152       mov a, #'.'
+03BC 12039F     153       lcall putchar
+03BF            154   
+03BF            155       ; 3. Send Fractional Part (from bcd+1 and bcd+0)
+03BF            156       ; To keep Python happy, we send the digits immediately after the dot
+03BF E539       157       mov a, bcd+1
+03C1 C4         158       swap a
+03C2 540F       159       anl a, #0x0F
+03C4 4430       160       orl a, #0x30
+03C6 12039F     161       lcall putchar
+03C9            162       
+03C9 E539       163       mov a, bcd+1
+03CB 540F       164       anl a, #0x0F
+03CD 4430       165       orl a, #0x30
+03CF 12039F     166       lcall putchar
+03D2            167   
+03D2 7420       168       mov a, #' '
+03D4 12039F     169       lcall putchar
+03D7 200104     170       jb isF, SendF_Serial
+03DA 7443       171       mov a, #'C'
+03DC 8002       172       sjmp Send_LineEnd
+03DE            173   SendF_Serial:
+03DE 7446       174       mov a, #'F'
+03E0            175   
+03E0            176   Send_LineEnd:
+03E0 12039F     177       lcall putchar
+03E3            178   
+03E3            179       ; 5. End of Line (CR + LF)
+03E3 740D       180       mov a, #0x0D
+03E5 12039F     181       lcall putchar
+03E8 740A       182       mov a, #0x0A
+03EA 12039F     183       lcall putchar
+03ED 22         184       ret
+03EE            185       
+03EE            186    Display_formated_BCD:
+03EE C0E0       187            push acc
+03F0 740A       187            mov a, #10
+03F2 14         187            dec a
+03F3 1200B2     187            lcall ?Set_Cursor_2 ; Select column and row
+03F6 D0E0       187            pop acc
+03F8 C000       188            push ar0
+03FA A83A       188            mov r0, bcd+2
+03FC 1200B9     188            lcall ?Display_BCD
+03FF D000       188            pop ar0
+0401 C0E0       189            push acc
+0403 742E       189            mov a, #'.'
+0405 12006A     189            lcall ?WriteData
+0408 D0E0       189            pop acc
+040A C000       190            push ar0
+040C A839       190            mov r0, bcd+1
+040E 1200B9     190            lcall ?Display_BCD
+0411 D000       190            pop ar0
+0413 C000       191            push ar0
+0415 A838       191            mov r0, bcd+0
+0417 1200B9     191            lcall ?Display_BCD
+041A D000       191            pop ar0
+041C 22         192            ret
+041D            193            
+041D            194    Debounce:
+041D 7A14       195       MOV R2,#20
+041F 120399     196       LCALL waitms
+0422 22         197       RET
+0423            198   
+0423            199   main:
+0423 C201       200            CLR isF     
+0425 75817F     201            mov sp, #0x7f
+0428 12033F     202            lcall Init_All
+042B 120074     203       lcall LCD_4BIT
+042E            204       
+042E            205       ; initial messages in LCD
+042E C0E0       206            push acc
+0430 7401       206            mov a, #1
+0432 14         206            dec a
+0433 1200B4     206            lcall ?Set_Cursor_1 ; Select column and row
+0436 D0E0       206            pop acc
+0438 C083       207            push dph
+043A C082       207            push dpl
+043C C0E0       207            push acc
+043E 900003     207            mov dptr, #test_message
+0441 1200A7     207            lcall ?Send_Constant_String
+0444 D0E0       207            pop acc
+0446 D082       207            pop dpl
+0448 D083       207            pop dph
+044A C0E0       208            push acc
+044C 7401       208            mov a, #1
+044E 14         208            dec a
+044F 1200B2     208            lcall ?Set_Cursor_2 ; Select column and row
+0452 D0E0       208            pop acc
+0454 C083       209            push dph
+0456 C082       209            push dpl
+0458 C0E0       209            push acc
+045A 900014     209            mov dptr, #value_message
+045D 1200A7     209            lcall ?Send_Constant_String
+0460 D0E0       209            pop acc
+0462 D082       209            pop dpl
+0464 D083       209            pop dph
+0466            210     
+0466            211       
+0466            212   Forever:
+0466            213       
+0466            214       Check_Button:
+0466 209508     215       JB  P1.5, NoPress      ; if P1.5 = 1 ? not pressed
+0469 B201       216       CPL isF                ; toggle C/F mode
+046B 12041D     217       LCALL Debounce
+046E            218            WaitRelease:
+046E 3095FD     219       JNB P1.5, WaitRelease  ; wait until button released
+0471            220            NoPress:
+0471            221       
+0471 C2EF       222            clr ADCF
+0473 D2EE       223            setb ADCS ;  ADC start trigger signal
+0475 30EFFD     224       jnb ADCF, $ ; Wait for conversion complete
+0478            225       
+0478            226   
+0478            227       ; Read the ADC result and store in [R1, R0]
+0478 E5C3       228       mov a, ADCRH   
+047A C4         229       swap a
+047B C0E0       230       push acc
+047D 540F       231       anl a, #0x0f
+047F F9         232       mov R1, a
+0480 D0E0       233       pop acc
+0482 54F0       234       anl a, #0xf0
+0484 45C2       235       orl a, ADCRL
+0486 F8         236       mov R0, A
+0487            237       
+0487            238       ; Convert to voltage
+0487 8830       239            mov x+0, R0
+0489 8931       240            mov x+1, R1
+048B 753200     241            mov x+2, #0
+048E 753300     242            mov x+3, #0
+0491 753440     243            mov y+0, #low (50240 % 0x10000) 
+0494 7535C4     243            mov y+1, #high(50240 % 0x10000) 
+0497 753600     243            mov y+2, #low (50240 / 0x10000) 
+049A 753700     243            mov y+3, #high(50240 / 0x10000)  ; VCC voltage measured
+049D 120249     244            lcall mul32
+04A0 7534FF     245            mov y+0, #low (4095 % 0x10000) 
+04A3 75350F     245            mov y+1, #high(4095 % 0x10000) 
+04A6 753600     245            mov y+2, #low (4095 / 0x10000) 
+04A9 753700     245            mov y+3, #high(4095 / 0x10000) 
+04AC 1202D6     246            lcall div32
+04AF 7534A4     247            mov y+0, #low (27300 % 0x10000) 
+04B2 75356A     247            mov y+1, #high(27300 % 0x10000) 
+04B5 753600     247            mov y+2, #low (27300 / 0x10000) 
+04B8 753700     247            mov y+3, #high(27300 / 0x10000) 
+04BB 1201B5     248            lcall sub32
+04BE 753464     249            mov y+0, #low (100 % 0x10000) 
+04C1 753500     249            mov y+1, #high(100 % 0x10000) 
+04C4 753600     249            mov y+2, #low (100 / 0x10000) 
+04C7 753700     249            mov y+3, #high(100 / 0x10000) 
+04CA            250      
+04CA 120249     251       lcall mul32
+04CD            252       
+04CD            253   
+04CD 200102     254            JB isF, ConvertToF
+04D0 802D       255            SJMP SkipF
+04D2            256            
+04D2            257            ConvertToF:
+04D2            258            
+04D2 753409     259            mov y+0, #low (9 % 0x10000) 
+04D5 753500     259            mov y+1, #high(9 % 0x10000) 
+04D8 753600     259            mov y+2, #low (9 / 0x10000) 
+04DB 753700     259            mov y+3, #high(9 / 0x10000) 
+04DE 120249     260                LCALL mul32       
+04E1 753405     261            mov y+0, #low (5 % 0x10000) 
+04E4 753500     261            mov y+1, #high(5 % 0x10000) 
+04E7 753600     261            mov y+2, #low (5 / 0x10000) 
+04EA 753700     261            mov y+3, #high(5 / 0x10000) 
+04ED 1202D6     262                LCALL div32       
+04F0 753400     263            mov y+0, #low (320000 % 0x10000) 
+04F3 7535E2     263            mov y+1, #high(320000 % 0x10000) 
+04F6 753604     263            mov y+2, #low (320000 / 0x10000) 
+04F9 753700     263            mov y+3, #high(320000 / 0x10000) 
+04FC 120194     264                LCALL add32       
+04FF            265            
+04FF            266            SkipF:
+04FF            267            
+04FF            268   
+04FF 1200CF     269            lcall hex2bcd
+0502 1203EE     270            lcall Display_formated_BCD
+0505 1203A7     271            lcall Send_Temp_Serial
+0508            272   
+0508            273   
+0508 C0E0       274            push acc
+050A 740F       274            mov a, #15
+050C 14         274            dec a
+050D 1200B2     274            lcall ?Set_Cursor_2 ; Select column and row
+0510 D0E0       274            pop acc
+0512            275            
+0512 74DF       276            MOV A, #0DFh     
+0514 12006A     277            LCALL ?WriteData
+0517            278            
+0517 C0E0       279            push acc
+0519 7410       279            mov a, #16
+051B 14         279            dec a
+051C 1200B2     279            lcall ?Set_Cursor_2 ; Select column and row
+051F D0E0       279            pop acc
+0521 200104     280            JB  isF, ShowF2
+0524 7443       281            MOV A, #'C'
+0526 8002       282            SJMP WriteUnit2
+0528            283            
+0528            284            ShowF2:
+0528 7446       285            MOV A, #'F'
+052A            286            
+052A            287            WriteUnit2:
+052A 12006A     288            LCALL ?WriteData
+052D            289   
+052D 7AFA       290            mov R2, #250
+052F 120399     291            lcall waitms
+0532 7AFA       292            mov R2, #250
+0534 120399     293            lcall waitms
+0537            294            
+0537 020466     295            ljmp Forever
+053A            296            
+053A            297   END
