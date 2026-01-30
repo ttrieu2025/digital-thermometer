@@ -18,7 +18,7 @@ The thermometer firmware is implemented on an 8051-based microcontroller (N76E00
 * Firmware-level calibration and unit conversion
 
 * Serial output for monitoring and visualization
-* Python-based strip chart with Celcius and Fahrenheit degress
+* Python-based strip chart with Celsius and Fahrenheit degress
 
 ![Celcius Mode](Public/Celcius.jpg)
 
